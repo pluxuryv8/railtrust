@@ -21,11 +21,14 @@ export interface ParsedItem {
   locationType?: string; // STATION, PORT, WAREHOUSE, etc.
   distanceToDestination?: number;
   eta?: string;
+  etaUnload?: string;        // Дата разгрузки
   eventTime?: string;
   origin?: string;
   destination?: string;
   carrierName?: string;
   carrierType?: string;
+  sourceInfo?: string;       // Источник данных (CRM, Excel, Email и т.д.)
+  operatorComment?: string;  // Комментарий оператора
   rawSource: string;
   extractionConfidence: number;
 }
@@ -126,19 +129,45 @@ export class UniversalParser {
     const eta = this.extractETA(text);
     if (eta) confidence += 0.1;
 
+    // Извлекаем дату разгрузки
+    const etaUnload = this.extractUnloadDate(text);
+
     // Определяем статус
     const { statusCode, statusText } = this.extractStatus(text);
     if (statusCode !== 'UNKNOWN') confidence += 0.15;
 
-    // Извлекаем пункты отправления/назначения
-    const origin = this.extractOrigin(text);
-    const destination = this.extractDestination(text);
+    // Сначала пробуем извлечь маршрут целиком (более точно)
+    const route = this.extractRoute(text);
+    
+    // Если маршрут не нашёлся, пробуем отдельные поля
+    let origin = route?.origin;
+    let destination = route?.destination;
+    
+    if (!origin) {
+      origin = this.extractOrigin(text);
+    }
+    if (!destination) {
+      destination = this.extractDestination(text);
+      // Фильтруем "порт" как destination если это не настоящий пункт назначения
+      if (destination?.toLowerCase() === 'порт' || destination?.toLowerCase() === 'port') {
+        destination = undefined;
+      }
+    }
+    
+    if (origin) confidence += 0.05;
+    if (destination) confidence += 0.05;
 
     // Извлекаем перевозчика
     const carrierName = this.extractCarrier(text);
 
     // Извлекаем дату события
     const eventTime = this.extractEventTime(text);
+
+    // Извлекаем источник данных
+    const sourceInfo = this.extractSourceInfo(text);
+
+    // Извлекаем комментарий оператора
+    const operatorComment = this.extractOperatorComment(text);
 
     if (containerNumber) confidence += 0.05;
 
@@ -149,10 +178,13 @@ export class UniversalParser {
       location,
       distanceToDestination: distance,
       eta,
+      etaUnload,
       eventTime,
       origin,
       destination,
       carrierName,
+      sourceInfo,
+      operatorComment,
       rawSource: text,
       extractionConfidence: Math.min(confidence, 1),
     };
@@ -570,19 +602,33 @@ export class UniversalParser {
    */
   private extractLocation(text: string): string | undefined {
     const patterns = [
-      /(?:ст\.|станци[яи]|station)\s+([А-Яа-яёЁA-Za-z\-]+(?:\s+[А-Яа-яёЁA-Za-z\-]+)?)/i,
+      // Местоположение: порт Владивосток.
+      /(?:местоположение|location)[:\s]+(?:порт\s+)?([А-Яа-яёЁA-Za-z\-]+)(?:\.|,|$|\n)/i,
+      // порт Владивосток
       /(?:порт|port)\s+([А-Яа-яёЁA-Za-z\-]+)/i,
-      /(?:местоположение|location)[:\s]+([А-Яа-яёЁA-Za-z\-\s]+?)(?:,|$|\d)/i,
+      // станция Гончарово
+      /(?:ст\.|станци[яи]|station)\s+([А-Яа-яёЁA-Za-z\-]+(?:\s*[\-]\s*[А-Яа-яёЁA-Za-z]+)?)/i,
+      // в порту Владивосток
       /(?:в порту|in port)\s+([А-Яа-яёЁA-Za-z\-]+)/i,
+      // на станции Гончарово
       /(?:на станции|at station)\s+([А-Яа-яёЁA-Za-z\-]+)/i,
-      /(?:прибыл[а]?\s+(?:в|на))\s+([А-Яа-яёЁA-Za-z\-]+)/i,
-      /(?:текущее местоположение|current location)[:\s]*([^\d,]+?)(?:,|\d|$)/i,
+      // прибыл в Владивосток
+      /(?:прибыл[а]?\s+в)\s+([А-Яа-яёЁA-Za-z\-]+)/i,
+      // текущее местоположение: Владивосток
+      /(?:текущее местоположение|current location)[:\s]*([А-Яа-яёЁA-Za-z\-]+)/i,
+      // находится в/на X
+      /(?:находится\s+(?:в|на))\s+([А-Яа-яёЁA-Za-z\-]+)/i,
     ];
 
     for (const pattern of patterns) {
       const match = text.match(pattern);
       if (match && match[1]) {
-        return match[1].trim();
+        const location = match[1].trim();
+        // Фильтруем служебные слова
+        if (location.length > 2 && 
+            !['назначения', 'отправления', 'destination', 'origin'].includes(location.toLowerCase())) {
+          return location;
+        }
       }
     }
 
@@ -765,14 +811,33 @@ export class UniversalParser {
    */
   private extractCarrier(text: string): string | undefined {
     const patterns = [
-      /(?:перевозчик|carrier|оператор)[:\s]+([А-Яа-яёЁA-Za-z\s]+?)(?:,|$|\.|от)/i,
-      /(?:линия|line)[:\s]+([А-Яа-яёЁA-Za-z\s]+)/i,
+      /(?:оператор\s*связи|carrier|перевозчик)[:\s]+([А-Яа-яёЁA-Za-z\s\-]+?)(?:\n|$|\.)/i,
+      /(?:shipping\s*line|морская\s*линия|линия)[:\s]+([А-Яа-яёЁA-Za-z\s\-]+?)(?:\n|$|\.)/i,
+      /(?:оператор|operator)[:\s]+([А-Яа-яёЁA-Za-z\s\-]+?)(?:\n|$|\.)/i,
+      /(?:компания|company)[:\s]+([А-Яа-яёЁA-Za-z\s\-]+?)(?:\n|$|\.)/i,
     ];
 
     for (const pattern of patterns) {
       const match = text.match(pattern);
       if (match && match[1]) {
-        return match[1].trim();
+        const carrier = match[1].trim();
+        // Убираем если слишком короткий или слишком длинный
+        if (carrier.length > 2 && carrier.length < 100) {
+          return carrier;
+        }
+      }
+    }
+
+    // Ищем известные компании
+    const knownCarriers = [
+      'Maersk', 'MSC', 'CMA CGM', 'COSCO', 'Hapag-Lloyd', 'ONE', 'Evergreen',
+      'Yang Ming', 'HMM', 'ZIM', 'PIL', 'Wan Hai', 'SITC', 'FESCO',
+      'SeaTrade', 'TransContainer', 'РЖД', 'ОТЭКО'
+    ];
+
+    for (const carrier of knownCarriers) {
+      if (text.toLowerCase().includes(carrier.toLowerCase())) {
+        return carrier;
       }
     }
 
@@ -792,6 +857,126 @@ export class UniversalParser {
       const match = text.match(pattern);
       if (match && match[1]) {
         return this.parseDate(match[1]) || undefined;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Извлечение маршрута (origin → destination)
+   */
+  private extractRoute(text: string): { origin?: string; destination?: string } | undefined {
+    // Unicode стрелки и разделители
+    const arrowPattern = '[→\\->–—]';
+    
+    const patterns = [
+      // Маршрут: Ningbo (CN) → Vladivostok (RU).
+      new RegExp(`(?:маршрут|route)[:\\s]*([A-Za-zА-Яа-яёЁ]+)\\s*(?:\\([A-Z]{2}\\))?\\s*${arrowPattern}+\\s*([A-Za-zА-Яа-яёЁ]+)\\s*(?:\\([A-Z]{2}\\))?`, 'i'),
+      // Ningbo → Vladivostok (без "маршрут:")
+      new RegExp(`([A-Z][a-z]{2,})\\s*(?:\\([A-Z]{2}\\))?\\s*${arrowPattern}+\\s*([A-Z][a-z]{2,})\\s*(?:\\([A-Z]{2}\\))?`),
+      // из Шанхая в Москву
+      /из\s+([А-Яа-яёЁA-Za-z\-]+)\s+(?:в|до|на)\s+([А-Яа-яёЁA-Za-z\-]+)/i,
+      // from Shanghai to Moscow
+      /from\s+([A-Za-z\-]+)\s+to\s+([A-Za-z\-]+)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match && match[1] && match[2]) {
+        const origin = match[1].trim();
+        const destination = match[2].trim();
+        // Фильтруем слишком короткие или служебные слова
+        const skipWords = ['порт', 'port', 'станция', 'station', 'cn', 'ru', 'в', 'на', 'to', 'from'];
+        if (origin.length > 2 && destination.length > 2 && 
+            !skipWords.includes(origin.toLowerCase()) &&
+            !skipWords.includes(destination.toLowerCase())) {
+          return { origin, destination };
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Извлечение даты разгрузки
+   */
+  private extractUnloadDate(text: string): string | undefined {
+    const patterns = [
+      /(?:разгрузк[аи]|unload(?:ing)?|выгрузк[аи])[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
+      /(?:ориентир\w*\s*разгрузк[аи])[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
+      /(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})\s*[-–—]?\s*(?:разгрузк|выгрузк)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        return this.parseDate(match[1]) || undefined;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Извлечение источника данных
+   */
+  private extractSourceInfo(text: string): string | undefined {
+    const patterns = [
+      /(?:источник\s*(?:данных)?|source)[:\s]*([^\n.]+)/i,
+      /(?:получено\s*из|from)[:\s]*([^\n.]+)/i,
+      /\(([^)]*(?:CRM|Excel|email|API|сайт|site|выгрузк)[^)]*)\)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        const source = match[1].trim();
+        if (source.length > 3 && source.length < 100) {
+          return source;
+        }
+      }
+    }
+
+    // Ищем ключевые слова
+    const lowerText = text.toLowerCase();
+    if (lowerText.includes('crm')) return 'CRM';
+    if (lowerText.includes('excel')) return 'Excel';
+    if (lowerText.includes('email') || lowerText.includes('письм')) return 'Email';
+    if (lowerText.includes('api')) return 'API';
+    if (lowerText.includes('сайт') || lowerText.includes('site')) return 'Сайт';
+
+    return undefined;
+  }
+
+  /**
+   * Извлечение комментария оператора
+   */
+  private extractOperatorComment(text: string): string | undefined {
+    const patterns = [
+      // Комментарий оператора: текст
+      /(?:комментарий\s*оператора|operator\s*comment)[:\s]*([^\n]+)/i,
+      // Комментарий: текст
+      /(?:комментарий|comment)[:\s]*([^\n]+)/i,
+      // Примечание: текст
+      /(?:примечани[ея]|note)[:\s]*([^\n]+)/i,
+      // Замечание: текст
+      /(?:замечани[ея]|remark)[:\s]*([^\n]+)/i,
+      // Доп. информация: текст
+      /(?:доп\.?\s*информация|additional\s*info)[:\s]*([^\n]+)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        let comment = match[1].trim();
+        // Убираем лишние префиксы если остались
+        comment = comment.replace(/^оператора[:\s]*/i, '').trim();
+        // Убираем если слишком короткий или слишком длинный
+        if (comment.length > 5 && comment.length < 500) {
+          return comment;
+        }
       }
     }
 

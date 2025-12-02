@@ -239,6 +239,9 @@ export class DataValidator {
     // 8. ФОРМИРОВАНИЕ РЕЗУЛЬТАТА
     // ═══════════════════════════════════════════════════
     
+    // Валидация даты разгрузки
+    const etaUnload = this.validateDate(item.etaUnload);
+
     const normalized: NormalizedStatusEvent = {
       containerNumber: item.containerNumber,
       statusCode: statusCode,
@@ -246,12 +249,15 @@ export class DataValidator {
       location: normalizedLocation,
       distanceToDestinationKm: this.validateDistance(item.distanceToDestination),
       eta: eta,
+      etaUnload: etaUnload,
       eventTime: eventTime,
       sourceType: 'MANUAL' as SourceType,
       sourceRaw: item.rawSource,
       origin: this.sanitizeString(item.origin),
       destination: this.sanitizeString(item.destination),
       carrierName: this.sanitizeString(item.carrierName),
+      sourceInfo: this.sanitizeString(item.sourceInfo),
+      operatorComment: this.sanitizeString(item.operatorComment),
     };
 
     const hasMinimalData = !!(

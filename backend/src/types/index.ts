@@ -13,6 +13,7 @@ export interface NormalizedStatusEvent {
   location?: string | null;
   distanceToDestinationKm?: number | null;
   eta?: string | null;
+  etaUnload?: string | null;        // Дата разгрузки
   eventTime?: string;
   sourceType: SourceType;
   sourceRaw?: string | null;
@@ -21,6 +22,8 @@ export interface NormalizedStatusEvent {
   origin?: string;
   destination?: string;
   carrierName?: string;
+  sourceInfo?: string;              // Источник данных
+  operatorComment?: string;         // Комментарий оператора
 }
 
 // Входные данные для универсального процессора
