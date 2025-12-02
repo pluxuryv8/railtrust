@@ -44,7 +44,9 @@ export default function Layout() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
+  const [showDataModal, setShowDataModal] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [dataAction, setDataAction] = useState<'idle' | 'resetting' | 'seeding'>('idle');
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem('appSettings');
     return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
@@ -53,6 +55,44 @@ export default function Layout() {
   const saveSettings = (newSettings: AppSettings) => {
     setSettings(newSettings);
     localStorage.setItem('appSettings', JSON.stringify(newSettings));
+  };
+
+  const handleResetData = async () => {
+    if (!confirm('Вы уверены? Все контейнеры и события будут удалены!')) return;
+    
+    setDataAction('resetting');
+    try {
+      const res = await fetch('http://localhost:3001/api/ingest/reset', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        alert('База данных очищена!');
+        window.location.reload();
+      } else {
+        alert('Ошибка: ' + data.error);
+      }
+    } catch (error) {
+      alert('Ошибка соединения с сервером');
+    } finally {
+      setDataAction('idle');
+    }
+  };
+
+  const handleSeedData = async () => {
+    setDataAction('seeding');
+    try {
+      const res = await fetch('http://localhost:3001/api/ingest/seed', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        alert(`Создано ${data.containers?.length || 0} тестовых контейнеров!`);
+        window.location.reload();
+      } else {
+        alert('Ошибка: ' + data.error);
+      }
+    } catch (error) {
+      alert('Ошибка соединения с сервером');
+    } finally {
+      setDataAction('idle');
+    }
   };
 
   const navItems = [
@@ -144,13 +184,20 @@ export default function Layout() {
         </div>
 
         {/* Settings button */}
-        <div className="p-4 border-t border-slate-800/50">
+        <div className="p-4 border-t border-slate-800/50 space-y-2">
           <button
             onClick={() => setShowSettingsModal(true)}
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800/30 hover:bg-slate-700/50 text-slate-400 hover:text-white rounded-lg text-sm font-medium transition-colors"
           >
             <Settings className="w-4 h-4" />
             Настройки
+          </button>
+          <button
+            onClick={() => setShowDataModal(true)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800/30 hover:bg-slate-700/50 text-slate-400 hover:text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            <Database className="w-4 h-4" />
+            Управление данными
           </button>
         </div>
 
@@ -422,6 +469,101 @@ export default function Layout() {
               >
                 <Save className="w-4 h-4" />
                 Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Data Management Modal */}
+      {showDataModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 max-w-md w-full animate-slide-up">
+            <div className="p-5 border-b border-slate-700 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Database className="w-5 h-5 text-brand-400" />
+                Управление данными
+              </h3>
+              <button
+                onClick={() => setShowDataModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-5 space-y-4">
+              {/* Seed demo data */}
+              <div className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/50">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center flex-shrink-0">
+                    <RefreshCw className="w-5 h-5 text-green-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-medium text-white">Загрузить демо-данные</div>
+                    <p className="text-sm text-slate-400 mt-1">
+                      Создаёт 14 тестовых контейнеров со всеми возможными статусами (LOADED, IN_PORT, ON_SHIP, ON_RAIL, DELIVERED и др.)
+                    </p>
+                    <button
+                      onClick={handleSeedData}
+                      disabled={dataAction !== 'idle'}
+                      className="mt-3 px-4 py-2 bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {dataAction === 'seeding' ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Создание...
+                        </>
+                      ) : (
+                        <>
+                          <Container className="w-4 h-4" />
+                          Создать контейнеры
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Reset data */}
+              <div className="p-4 bg-slate-800/30 rounded-xl border border-red-500/30">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                    <X className="w-5 h-5 text-red-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-medium text-white">Очистить базу данных</div>
+                    <p className="text-sm text-slate-400 mt-1">
+                      Удаляет все контейнеры, события и сырые сообщения. Это действие необратимо!
+                    </p>
+                    <button
+                      onClick={handleResetData}
+                      disabled={dataAction !== 'idle'}
+                      className="mt-3 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {dataAction === 'resetting' ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Удаление...
+                        </>
+                      ) : (
+                        <>
+                          <X className="w-4 h-4" />
+                          Очистить всё
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 border-t border-slate-700">
+              <button
+                onClick={() => setShowDataModal(false)}
+                className="w-full px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                Закрыть
               </button>
             </div>
           </div>

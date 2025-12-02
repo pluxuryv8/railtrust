@@ -8,6 +8,8 @@ import {
   getProcessingLogs,
   getProcessingStats,
   testParsing,
+  resetDatabase,
+  seedDemoData,
 } from '../controllers/ingestController.js';
 
 const router = Router();
@@ -28,6 +30,9 @@ const router = Router();
  * 
  * GET /api/ingest/logs     - Логи обработки
  * GET /api/ingest/stats    - Статистика обработки
+ * 
+ * POST /api/ingest/reset   - Сброс базы данных
+ * POST /api/ingest/seed    - Заполнить тестовыми данными
  */
 
 // === ОСНОВНЫЕ ENDPOINTS ЗАГРУЗКИ ===
@@ -51,6 +56,14 @@ router.get('/logs', getProcessingLogs);
 
 // Статистика
 router.get('/stats', getProcessingStats);
+
+// === УПРАВЛЕНИЕ ДАННЫМИ ===
+
+// Сброс базы данных
+router.post('/reset', resetDatabase);
+
+// Заполнить тестовыми данными
+router.post('/seed', seedDemoData);
 
 export default router;
 

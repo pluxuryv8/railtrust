@@ -425,3 +425,194 @@ function determineSourceType(body: Record<string, unknown>, input: RawInput): So
   return 'MANUAL';
 }
 
+/**
+ * Сброс всех данных (контейнеры, события, сообщения)
+ */
+export async function resetDatabase(req: Request, res: Response): Promise<void> {
+  try {
+    // Удаляем в правильном порядке (из-за foreign keys)
+    await prisma.statusEvent.deleteMany();
+    await prisma.rawMessage.deleteMany();
+    await prisma.container.deleteMany();
+    await prisma.syncJob.deleteMany();
+    
+    res.json({
+      success: true,
+      message: 'База данных очищена',
+      deleted: {
+        statusEvents: true,
+        rawMessages: true,
+        containers: true,
+        syncJobs: true,
+      },
+    });
+  } catch (error) {
+    console.error('Reset database error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Ошибка при очистке базы данных' 
+    });
+  }
+}
+
+/**
+ * Заполнение тестовыми данными со всеми статусами
+ */
+export async function seedDemoData(req: Request, res: Response): Promise<void> {
+  try {
+    // Тестовые контейнеры со всеми статусами
+    const demoContainers = [
+      {
+        containerNumber: 'MSCU1234567',
+        containerType: '40',
+        originPoint: 'Шанхай',
+        destinationPoint: 'Москва',
+        status: { code: 'LOADED', text: 'Загружен', location: 'Шанхай', distance: 8500 },
+      },
+      {
+        containerNumber: 'HLBU2345678',
+        containerType: '40',
+        originPoint: 'Циндао',
+        destinationPoint: 'Новосибирск',
+        status: { code: 'IN_PORT', text: 'В порту отправления', location: 'Циндао', distance: 5200 },
+      },
+      {
+        containerNumber: 'CMAU3456789',
+        containerType: '20',
+        originPoint: 'Нинбо',
+        destinationPoint: 'Екатеринбург',
+        status: { code: 'ON_SHIP', text: 'В море', location: 'Японское море', distance: 4800 },
+      },
+      {
+        containerNumber: 'OOLU4567890',
+        containerType: '40',
+        originPoint: 'Пусан',
+        destinationPoint: 'Владивосток',
+        status: { code: 'ON_ANCHORAGE', text: 'На рейде', location: 'Владивосток', distance: 50 },
+      },
+      {
+        containerNumber: 'CSQU5678901',
+        containerType: '40',
+        originPoint: 'Шанхай',
+        destinationPoint: 'Красноярск',
+        status: { code: 'ARRIVED_PORT', text: 'Прибыл в порт', location: 'Владивосток', distance: 4100 },
+      },
+      {
+        containerNumber: 'EITU6789012',
+        containerType: '20',
+        originPoint: 'Далянь',
+        destinationPoint: 'Иркутск',
+        status: { code: 'ON_WAREHOUSE', text: 'На складе СВХ', location: 'Владивосток СВХ', distance: 3800 },
+      },
+      {
+        containerNumber: 'TGHU7890123',
+        containerType: '40',
+        originPoint: 'Гуанчжоу',
+        destinationPoint: 'Москва',
+        status: { code: 'CUSTOMS', text: 'На таможне', location: 'Владивосток', distance: 9200 },
+      },
+      {
+        containerNumber: 'NYKU8901234',
+        containerType: '40',
+        originPoint: 'Токио',
+        destinationPoint: 'Казань',
+        status: { code: 'CUSTOMS_CLEARED', text: 'Растаможен', location: 'Владивосток', distance: 6500 },
+      },
+      {
+        containerNumber: 'YMLU9012345',
+        containerType: '20',
+        originPoint: 'Сингапур',
+        destinationPoint: 'Новосибирск',
+        status: { code: 'ON_RAIL', text: 'В пути по ЖД', location: 'ст. Гончарово', distance: 1857 },
+      },
+      {
+        containerNumber: 'KKFU0123456',
+        containerType: '40',
+        originPoint: 'Шэньчжэнь',
+        destinationPoint: 'Екатеринбург',
+        status: { code: 'RAIL_ARRIVED', text: 'Прибыл на станцию', location: 'ст. Екатеринбург-Товарный', distance: 0 },
+      },
+      {
+        containerNumber: 'MOLU1234560',
+        containerType: '20',
+        originPoint: 'Нинбо',
+        destinationPoint: 'Пермь',
+        status: { code: 'ON_AUTO', text: 'Автодоставка', location: 'Пермь', distance: 25 },
+      },
+      {
+        containerNumber: 'TRLU2345670',
+        containerType: '40',
+        originPoint: 'Пусан',
+        destinationPoint: 'Челябинск',
+        status: { code: 'DELIVERED', text: 'Доставлен', location: 'Челябинск', distance: 0 },
+      },
+      {
+        containerNumber: 'FCIU3456780',
+        containerType: '40',
+        originPoint: 'Шанхай',
+        destinationPoint: 'Самара',
+        status: { code: 'IN_TRANSIT', text: 'В пути', location: 'Забайкальск', distance: 4200 },
+      },
+      {
+        containerNumber: 'GESU4567891',
+        containerType: '20',
+        originPoint: 'Циндао',
+        destinationPoint: 'Омск',
+        status: { code: 'UNLOADED', text: 'Выгружен', location: 'Омск', distance: 0 },
+      },
+    ];
+
+    const createdContainers = [];
+    const now = new Date();
+
+    for (let i = 0; i < demoContainers.length; i++) {
+      const demo = demoContainers[i];
+      
+      // Создаём контейнер
+      const container = await prisma.container.create({
+        data: {
+          containerNumber: demo.containerNumber,
+          containerType: demo.containerType,
+          originPoint: demo.originPoint,
+          destinationPoint: demo.destinationPoint,
+        },
+      });
+
+      // Создаём событие статуса
+      const eta = new Date(now);
+      eta.setDate(eta.getDate() + Math.floor(Math.random() * 14) + 1); // 1-14 дней
+
+      await prisma.statusEvent.create({
+        data: {
+          containerId: container.id,
+          statusCode: demo.status.code as any,
+          statusText: demo.status.text,
+          location: demo.status.location,
+          distanceToDestinationKm: demo.status.distance,
+          eta: eta,
+          eventTime: new Date(now.getTime() - Math.random() * 24 * 60 * 60 * 1000), // За последние 24 часа
+          sourceType: 'MANUAL',
+          sourceRaw: `Демо-данные: ${demo.status.text}`,
+        },
+      });
+
+      createdContainers.push({
+        containerNumber: demo.containerNumber,
+        status: demo.status.code,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Создано ${createdContainers.length} тестовых контейнеров со всеми статусами`,
+      containers: createdContainers,
+    });
+  } catch (error) {
+    console.error('Seed demo data error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Ошибка при создании тестовых данных' 
+    });
+  }
+}
+
