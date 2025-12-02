@@ -16,7 +16,12 @@ import {
   Clock,
   RefreshCw,
   Eye,
-  Save
+  Save,
+  Info,
+  Server,
+  Database,
+  CheckCircle,
+  ExternalLink
 } from 'lucide-react';
 import { exportApi } from '../api/client';
 
@@ -38,6 +43,7 @@ export default function Layout() {
   const location = useLocation();
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showAboutModal, setShowAboutModal] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem('appSettings');
@@ -148,17 +154,21 @@ export default function Layout() {
           </button>
         </div>
 
-        {/* Footer */}
+        {/* Footer - clickable */}
         <div className="px-4 pb-4">
-          <div className="px-4 py-3 rounded-lg bg-slate-800/30">
-            <div className="flex items-center gap-2 text-xs text-slate-500">
+          <button
+            onClick={() => setShowAboutModal(true)}
+            className="w-full px-4 py-3 rounded-lg bg-slate-800/30 hover:bg-slate-800/50 transition-colors text-left group"
+          >
+            <div className="flex items-center gap-2 text-xs text-slate-500 group-hover:text-slate-400">
               <LayoutDashboard className="w-4 h-4" />
               <span>Панель логиста</span>
+              <Info className="w-3 h-3 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
-            <div className="text-[10px] text-slate-600 mt-1">
-              {settings.companyName}
+            <div className="text-[10px] text-slate-600 group-hover:text-slate-500 mt-1">
+              {settings.companyName} • v1.0.0
             </div>
-          </div>
+          </button>
         </div>
       </aside>
 
@@ -412,6 +422,99 @@ export default function Layout() {
               >
                 <Save className="w-4 h-4" />
                 Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* About Modal */}
+      {showAboutModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 max-w-md w-full animate-slide-up">
+            <div className="p-6 text-center border-b border-slate-700">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-brand-500/20">
+                <Zap className="w-8 h-8 text-white" />
+              </div>
+              <h2 className="text-xl font-bold text-white">SmartSync Adaptive</h2>
+              <p className="text-sm text-slate-400 mt-1">Система отслеживания контейнерных перевозок</p>
+              <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 bg-brand-500/10 text-brand-400 rounded-full text-xs font-medium">
+                <CheckCircle className="w-3 h-3" />
+                Версия 1.0.0
+              </div>
+            </div>
+            
+            <div className="p-5 space-y-4">
+              {/* Company */}
+              <div className="flex items-center gap-3 p-3 bg-slate-800/30 rounded-lg">
+                <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center">
+                  <LayoutDashboard className="w-5 h-5 text-slate-400" />
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-white">{settings.companyName}</div>
+                  <div className="text-xs text-slate-500">Панель логиста</div>
+                </div>
+              </div>
+
+              {/* Status */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-2 p-3 bg-slate-800/30 rounded-lg">
+                  <Server className="w-4 h-4 text-green-400" />
+                  <div>
+                    <div className="text-xs text-slate-500">Backend</div>
+                    <div className="text-sm text-green-400">Онлайн</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 p-3 bg-slate-800/30 rounded-lg">
+                  <Database className="w-4 h-4 text-green-400" />
+                  <div>
+                    <div className="text-xs text-slate-500">База данных</div>
+                    <div className="text-sm text-green-400">Подключена</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Features */}
+              <div className="p-3 bg-slate-800/30 rounded-lg">
+                <div className="text-xs text-slate-500 mb-2">Возможности системы</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {['Автодетект форматов', 'ISO 6346', 'Экспорт 1С', 'Уведомления'].map(feature => (
+                    <span key={feature} className="px-2 py-1 bg-slate-700/50 text-slate-300 rounded text-xs">
+                      {feature}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Links */}
+              <div className="flex gap-2">
+                <a
+                  href="https://github.com/pluxuryv8/railtrust"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-sm transition-colors"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  GitHub
+                </a>
+                <a
+                  href="http://localhost:3001/api/health"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-sm transition-colors"
+                >
+                  <Server className="w-4 h-4" />
+                  API Status
+                </a>
+              </div>
+            </div>
+
+            <div className="p-5 border-t border-slate-700">
+              <button
+                onClick={() => setShowAboutModal(false)}
+                className="w-full px-4 py-2.5 bg-brand-500 hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                Закрыть
               </button>
             </div>
           </div>
