@@ -1,0 +1,211 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  --color-brand: #0c8ee9;
+  --color-rail-dark: #0f172a;
+  --color-rail: #1e3a5f;
+}
+
+body {
+  @apply bg-slate-950 text-slate-100 antialiased;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  background-image: 
+    radial-gradient(ellipse 80% 80% at 50% -20%, rgba(12, 142, 233, 0.08), transparent),
+    radial-gradient(ellipse 50% 50% at 0% 100%, rgba(12, 142, 233, 0.05), transparent);
+  background-attachment: fixed;
+}
+
+/* Monospace font for data */
+.font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-900;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-700 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-600;
+}
+
+/* Selection */
+::selection {
+  @apply bg-brand-500/30 text-white;
+}
+
+/* Focus styles */
+*:focus-visible {
+  @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-slate-900;
+}
+
+/* Animation delays for staggered reveals */
+.animate-delay-100 { animation-delay: 100ms; }
+.animate-delay-200 { animation-delay: 200ms; }
+.animate-delay-300 { animation-delay: 300ms; }
+.animate-delay-400 { animation-delay: 400ms; }
+.animate-delay-500 { animation-delay: 500ms; }
+
+/* Table styles */
+.data-table {
+  @apply w-full text-sm;
+}
+
+.data-table thead {
+  @apply sticky top-0 z-10;
+}
+
+.data-table th {
+  @apply bg-slate-900/95 backdrop-blur-sm px-4 py-3 text-left font-semibold text-slate-300 border-b border-slate-700/50;
+}
+
+.data-table td {
+  @apply px-4 py-3 border-b border-slate-800/50;
+}
+
+.data-table tbody tr {
+  @apply transition-colors duration-150;
+}
+
+.data-table tbody tr:hover {
+  @apply bg-slate-800/30;
+}
+
+/* Status badge colors */
+.status-loaded { @apply bg-blue-500/20 text-blue-400 border-blue-500/30; }
+.status-in-port { @apply bg-cyan-500/20 text-cyan-400 border-cyan-500/30; }
+.status-on-ship { @apply bg-indigo-500/20 text-indigo-400 border-indigo-500/30; }
+.status-on-anchorage { @apply bg-violet-500/20 text-violet-400 border-violet-500/30; }
+.status-arrived-port { @apply bg-teal-500/20 text-teal-400 border-teal-500/30; }
+.status-on-warehouse { @apply bg-amber-500/20 text-amber-400 border-amber-500/30; }
+.status-customs-cleared { @apply bg-emerald-500/20 text-emerald-400 border-emerald-500/30; }
+.status-on-rail { @apply bg-orange-500/20 text-orange-400 border-orange-500/30; }
+.status-rail-arrived { @apply bg-lime-500/20 text-lime-400 border-lime-500/30; }
+.status-on-auto { @apply bg-rose-500/20 text-rose-400 border-rose-500/30; }
+.status-delivered { @apply bg-green-500/20 text-green-400 border-green-500/30; }
+.status-unknown { @apply bg-slate-500/20 text-slate-400 border-slate-500/30; }
+
+/* Timeline styles */
+.timeline-item::before {
+  content: '';
+  @apply absolute left-4 top-10 bottom-0 w-0.5 bg-slate-700;
+}
+
+.timeline-item:last-child::before {
+  @apply hidden;
+}
+
+/* Glass morphism cards */
+.glass-card {
+  @apply bg-slate-900/40 backdrop-blur-xl border border-slate-700/50 rounded-2xl;
+  box-shadow: 
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 4px 24px -8px rgba(0, 0, 0, 0.3);
+}
+
+/* Glowing borders */
+.glow-border {
+  position: relative;
+}
+
+.glow-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(12, 142, 233, 0.2), transparent 50%);
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.glow-border:hover::before {
+  opacity: 1;
+}
+
+/* Input focus glow */
+input:focus, textarea:focus, select:focus {
+  box-shadow: 
+    0 0 0 2px rgba(12, 142, 233, 0.2),
+    0 0 20px -5px rgba(12, 142, 233, 0.3);
+}
+
+/* Button hover effects */
+.btn-primary {
+  @apply relative overflow-hidden;
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.5s ease;
+}
+
+.btn-primary:hover::before {
+  transform: translateX(100%);
+}
+
+/* Status indicator pulse */
+.status-pulse {
+  @apply relative;
+}
+
+.status-pulse::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  animation: pulse-ring 2s ease-out infinite;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 0.4;
+  }
+  100% {
+    box-shadow: 0 0 0 8px currentColor;
+    opacity: 0;
+  }
+}
+
+/* Custom scrollbar for dark theme */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(51, 65, 85) transparent;
+}
+
+/* Loading skeleton */
+.skeleton {
+  @apply bg-slate-800/50 animate-pulse rounded;
+}
+
+/* Metric card hover */
+.metric-card {
+  @apply transition-all duration-300 ease-out;
+}
+
+.metric-card:hover {
+  @apply transform -translate-y-1;
+  box-shadow: 
+    0 4px 40px -12px rgba(12, 142, 233, 0.2),
+    0 0 0 1px rgba(12, 142, 233, 0.1);
+}
+

@@ -1,0 +1,214 @@
+// Prisma Schema for SmartSync Adaptive
+// Rail Trust Container Tracking System
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Enums
+// ============================================
+
+// Тип перевозчика/оператора
+enum CarrierType {
+  SEA_LINE   // Морская линия
+  RAIL       // ЖД оператор
+  AUTO       // Автоперевозчик
+  MULTIMODAL // Мультимодальный
+}
+
+// Тип источника данных (от оператора)
+enum SourceType {
+  EMAIL   // Email от оператора
+  EXCEL   // Табличные данные (Excel/1С выгрузка)
+  API     // API оператора
+  MANUAL  // Ручной ввод логистом
+}
+
+// Нормализованные статусы контейнера
+enum StatusCode {
+  LOADED            // Загружен
+  IN_PORT           // В порту
+  ON_SHIP           // В пути морем
+  ON_ANCHORAGE      // На рейде
+  ARRIVED_PORT      // Прибыл в порт назначения
+  ON_WAREHOUSE      // На складе СВХ
+  CUSTOMS           // На таможне
+  CUSTOMS_CLEARED   // Прошёл таможню (склад закрыт)
+  ON_RAIL           // В пути по ЖД
+  RAIL_ARRIVED      // Прибыл на ЖД станцию
+  ON_AUTO           // В пути автотранспортом
+  IN_TRANSIT        // В пути (общий)
+  UNLOADED          // Выгружен
+  DELIVERED         // Доставлен
+  UNKNOWN           // Неизвестно
+}
+
+// Тип задачи синхронизации
+enum SyncJobType {
+  IMPORT_EMAIL      // Импорт из email
+  IMPORT_TABLE      // Импорт из таблицы
+  IMPORT_API        // Импорт из API оператора
+  EXPORT_1C         // Экспорт в 1С
+}
+
+// Статус задачи синхронизации
+enum SyncJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+// ============================================
+// Models
+// ============================================
+
+// Перевозчик/Оператор — источник данных о статусах
+model Carrier {
+  id           String      @id @default(cuid())
+  name         String
+  type         CarrierType
+  contactEmail String?
+  description  String?     // Описание, особенности формата данных
+  containers   Container[]
+  rawMessages  RawMessage[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@map("carriers")
+}
+
+// Клиент — получатель груза
+model Client {
+  id         String      @id @default(cuid())
+  name       String
+  email      String?
+  phone      String?
+  inn        String?     // ИНН для российских компаний
+  contactPerson String?  // Контактное лицо (напр. "Илья")
+  containers Container[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@map("clients")
+}
+
+// Контейнер
+model Container {
+  id               String        @id @default(cuid())
+  containerNumber  String        @unique // Например: MSKU1234567
+  containerType    String?       // 20/24, 40 и т.д.
+  
+  // Маршрут
+  originPoint      String?       // Пункт отправления
+  destinationPoint String?       // Пункт назначения (конечная станция)
+  finalDestination String?       // Финальный пункт (склад получателя)
+  totalDistanceKm  Int?          // Общее расстояние маршрута
+  
+  // Связи
+  clientId         String?
+  client           Client?       @relation(fields: [clientId], references: [id])
+  carrierId        String?
+  carrier          Carrier?      @relation(fields: [carrierId], references: [id])
+  
+  // Статусы
+  statusEvents     StatusEvent[]
+  
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([containerNumber])
+  @@map("containers")
+}
+
+// Событие статуса контейнера (нормализованное)
+model StatusEvent {
+  id                      String     @id @default(cuid())
+  
+  // Связь с контейнером
+  containerId             String
+  container               Container  @relation(fields: [containerId], references: [id], onDelete: Cascade)
+  
+  // Нормализованные данные
+  statusCode              StatusCode
+  statusText              String     // Человекочитаемый статус (оригинал или из маппинга)
+  location                String?    // Текущее местоположение
+  distanceToDestinationKm Int?       // Расстояние до пункта назначения
+  eta                     DateTime?  // Ожидаемая дата прибытия
+  eventTime               DateTime   // Время события (когда произошло)
+  
+  // Источник данных (от какого оператора)
+  sourceType              SourceType
+  sourceRaw               String?    @db.Text // Исходные данные (для аудита)
+  
+  // Связь с сырым сообщением
+  rawMessageId            String?
+  rawMessage              RawMessage? @relation(fields: [rawMessageId], references: [id])
+  
+  createdAt               DateTime   @default(now())
+
+  @@index([containerId])
+  @@index([eventTime])
+  @@map("status_events")
+}
+
+// Сырые сообщения от операторов (для аудита и повторной обработки)
+model RawMessage {
+  id           String        @id @default(cuid())
+  sourceType   SourceType
+  content      String        @db.Text    // Исходный текст/JSON
+  
+  // Метаданные email
+  senderEmail  String?
+  subject      String?
+  
+  // Связь с оператором (если известен)
+  carrierId    String?
+  carrier      Carrier?      @relation(fields: [carrierId], references: [id])
+  
+  // Обработка
+  processed    Boolean       @default(false)
+  processedAt  DateTime?
+  errorMessage String?       // Ошибка при обработке
+  
+  // Результаты обработки
+  statusEvents StatusEvent[]
+  
+  createdAt    DateTime      @default(now())
+
+  @@index([processed])
+  @@index([createdAt])
+  @@map("raw_messages")
+}
+
+// Задача синхронизации (лог операций импорта/экспорта)
+model SyncJob {
+  id             String        @id @default(cuid())
+  type           SyncJobType
+  status         SyncJobStatus @default(PENDING)
+  
+  // Статистика
+  itemsTotal     Int           @default(0)
+  itemsProcessed Int           @default(0)
+  itemsFailed    Int           @default(0)
+  
+  // Ошибки
+  errorMessage   String?
+  errorDetails   String?       @db.Text
+  
+  // Время выполнения
+  startedAt      DateTime?
+  completedAt    DateTime?
+  
+  createdAt      DateTime      @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("sync_jobs")
+}
