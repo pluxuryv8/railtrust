@@ -614,21 +614,73 @@ export class UniversalParser {
    * Извлечение ETA
    */
   private extractETA(text: string): string | undefined {
+    // Расширенные паттерны для извлечения ETA
     const patterns = [
-      /(?:eta|ориентир|прибытие|arrival)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
-      /(?:ожида[её]тся|expected)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
-      /(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})\s*(?:\(ориентир|прибытие)/i,
-      /(?:дата прибытия|arrival date)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
+      // Явные указания на ETA
+      /(?:eta|ета)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
+      /(?:ориентир\w*\s*(?:дата\s*)?(?:прибыти[яе])?)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
+      /(?:прибытие|прибудет|arrival)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
+      /(?:ожида[её]тся|expected|планируется)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
+      /(?:дата прибытия|arrival date|дата доставки)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
+      /(?:плановая дата|план\s*дата)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
+      
+      // Формат с годом впереди
+      /(?:eta|ориентир|прибытие)[:\s]*(\d{4}[.\/-]\d{1,2}[.\/-]\d{1,2})/i,
+      
+      // Дата в скобках после ключевых слов
+      /(?:ориентир|прибытие|eta)\s*[:\-]?\s*\(?(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})\)?/i,
+      
+      // Обратный порядок: дата перед словом
+      /(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})\s*[-–—]?\s*(?:ориентир|прибытие|eta)/i,
+      
+      // Словесные месяцы: "15 декабря 2025", "15 дек 2025"
+      /(?:eta|ориентир|прибытие)[:\s]*(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|янв|фев|мар|апр|мая|июн|июл|авг|сен|окт|ноя|дек)\.?\s*(\d{4}|\d{2})/i,
+      /(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|янв|фев|мар|апр|мая|июн|июл|авг|сен|окт|ноя|дек)\.?\s*(\d{4}|\d{2})\s*[-–—]?\s*(?:ориентир|прибытие)/i,
     ];
 
     for (const pattern of patterns) {
       const match = text.match(pattern);
-      if (match && match[1]) {
-        return this.parseDate(match[1]) || undefined;
+      if (match) {
+        // Проверяем, есть ли словесный месяц
+        if (match[2] && /[а-яё]/i.test(match[2])) {
+          const day = parseInt(match[1]);
+          const month = this.parseMonthName(match[2]);
+          let year = parseInt(match[3]);
+          if (year < 100) year += 2000;
+          
+          const date = new Date(year, month, day);
+          if (!isNaN(date.getTime())) {
+            return date.toISOString();
+          }
+        } else if (match[1]) {
+          const parsed = this.parseDate(match[1]);
+          if (parsed) return parsed;
+        }
       }
     }
 
     return undefined;
+  }
+
+  /**
+   * Парсинг названия месяца
+   */
+  private parseMonthName(name: string): number {
+    const months: Record<string, number> = {
+      'января': 0, 'янв': 0, 'jan': 0,
+      'февраля': 1, 'фев': 1, 'feb': 1,
+      'марта': 2, 'мар': 2, 'mar': 2,
+      'апреля': 3, 'апр': 3, 'apr': 3,
+      'мая': 4, 'may': 4,
+      'июня': 5, 'июн': 5, 'jun': 5,
+      'июля': 6, 'июл': 6, 'jul': 6,
+      'августа': 7, 'авг': 7, 'aug': 7,
+      'сентября': 8, 'сен': 8, 'sep': 8,
+      'октября': 9, 'окт': 9, 'oct': 9,
+      'ноября': 10, 'ноя': 10, 'nov': 10,
+      'декабря': 11, 'дек': 11, 'dec': 11,
+    };
+    return months[name.toLowerCase()] ?? 0;
   }
 
   /**
@@ -854,44 +906,83 @@ export class UniversalParser {
   private parseDate(value: unknown): string | null {
     if (!value) return null;
     
-    const str = String(value);
+    const str = String(value).trim();
     
-    // Пытаемся распарсить разные форматы
-    const formats = [
-      /^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/,    // DD.MM.YYYY
-      /^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2})$/,    // DD.MM.YY
-      /^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})$/,    // YYYY-MM-DD
+    // Форматы дат с регулярными выражениями
+    const datePatterns: Array<{
+      regex: RegExp;
+      order: 'DMY' | 'YMD' | 'MDY';
+    }> = [
+      // DD.MM.YYYY, DD-MM-YYYY, DD/MM/YYYY
+      { regex: /^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/, order: 'DMY' },
+      // DD.MM.YY
+      { regex: /^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2})$/, order: 'DMY' },
+      // YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+      { regex: /^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})$/, order: 'YMD' },
+      // YYYY-MM-DDTHH:mm:ss (ISO)
+      { regex: /^(\d{4})-(\d{2})-(\d{2})T/, order: 'YMD' },
+      // DD MMM YYYY (04 Dec 2025)
+      { regex: /^(\d{1,2})\s+([A-Za-zА-Яа-яёЁ]{3,})\s+(\d{4})$/, order: 'DMY' },
+      // DDMMYYYY (без разделителей)
+      { regex: /^(\d{2})(\d{2})(\d{4})$/, order: 'DMY' },
+      // YYYYMMDD (без разделителей)
+      { regex: /^(\d{4})(\d{2})(\d{2})$/, order: 'YMD' },
     ];
 
-    for (const format of formats) {
-      const match = str.match(format);
+    for (const { regex, order } of datePatterns) {
+      const match = str.match(regex);
       if (match) {
-        let year: number, month: number, day: number;
+        let day: number, month: number, year: number;
         
-        if (format === formats[2]) {
-          // YYYY-MM-DD
-          year = parseInt(match[1]);
-          month = parseInt(match[2]);
-          day = parseInt(match[3]);
-        } else {
-          // DD.MM.YYYY or DD.MM.YY
+        // Проверяем, есть ли текстовый месяц
+        if (/[A-Za-zА-Яа-яёЁ]/.test(match[2])) {
           day = parseInt(match[1]);
-          month = parseInt(match[2]);
+          month = this.parseMonthName(match[2]);
           year = parseInt(match[3]);
-          if (year < 100) year += 2000;
+        } else if (order === 'YMD') {
+          year = parseInt(match[1]);
+          month = parseInt(match[2]) - 1;
+          day = parseInt(match[3]);
+        } else if (order === 'MDY') {
+          month = parseInt(match[1]) - 1;
+          day = parseInt(match[2]);
+          year = parseInt(match[3]);
+        } else {
+          // DMY
+          day = parseInt(match[1]);
+          month = parseInt(match[2]) - 1;
+          year = parseInt(match[3]);
         }
-
-        const date = new Date(year, month - 1, day);
+        
+        // Корректируем двузначный год
+        if (year < 100) {
+          year += year > 50 ? 1900 : 2000;
+        }
+        
+        // Валидация диапазонов
+        if (month < 0 || month > 11) continue;
+        if (day < 1 || day > 31) continue;
+        if (year < 2020 || year > 2035) continue;
+        
+        const date = new Date(year, month, day);
         if (!isNaN(date.getTime())) {
           return date.toISOString();
         }
       }
     }
 
-    // Пробуем нативный парсинг
-    const date = new Date(str);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
+    // Пробуем нативный парсинг для ISO и других форматов
+    try {
+      const date = new Date(str);
+      if (!isNaN(date.getTime())) {
+        // Проверяем что дата в разумном диапазоне
+        const year = date.getFullYear();
+        if (year >= 2020 && year <= 2035) {
+          return date.toISOString();
+        }
+      }
+    } catch {
+      // Ошибка парсинга
     }
 
     return null;
