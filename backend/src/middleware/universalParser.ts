@@ -101,10 +101,31 @@ export class UniversalParser {
       return { items, errors, warnings };
     }
 
-    // Для каждого номера контейнера пытаемся извлечь данные
-    for (const containerNumber of containerNumbers) {
-      const item = this.extractDataFromText(text, containerNumber);
-      items.push(item);
+    // Проверяем batch формат - каждый контейнер на отдельной строке
+    const lines = text.split('\n').filter(l => l.trim());
+    const isBatchFormat = containerNumbers.length > 1 && 
+      lines.some(line => this.extractContainerNumbers(line).length === 1);
+
+    if (isBatchFormat && containerNumbers.length > 1) {
+      // Batch режим: парсим каждую строку с контейнером отдельно
+      for (const containerNumber of containerNumbers) {
+        // Находим строку с этим контейнером
+        const containerLine = lines.find(line => line.includes(containerNumber));
+        if (containerLine) {
+          const item = this.extractDataFromText(containerLine, containerNumber);
+          items.push(item);
+        } else {
+          // Fallback: используем весь текст
+          const item = this.extractDataFromText(text, containerNumber);
+          items.push(item);
+        }
+      }
+    } else {
+      // Обычный режим: для каждого номера контейнера пытаемся извлечь данные из всего текста
+      for (const containerNumber of containerNumbers) {
+        const item = this.extractDataFromText(text, containerNumber);
+        items.push(item);
+      }
     }
 
     return { items, errors, warnings };
@@ -334,11 +355,13 @@ export class UniversalParser {
     ]) as string | undefined;
 
     const location = this.findField(normalizedRow, [
-      'location', 'currentlocation', 'текущееместоположение', 'локация', 'местоположение', 'station', 'станция'
+      'location', 'currentlocation', 'текущееместоположение', 'локация', 'местоположение', 
+      'station', 'станция', 'currentpoint', 'current', 'lastseen', 'текущая'
     ]) as string | undefined;
 
     const distanceRaw = this.findField(normalizedRow, [
-      'distance', 'расстояние', 'дистанция', 'distancetodestination', 'км'
+      'distance', 'расстояние', 'дистанция', 'distancetodestination', 'distancekm', 
+      'disttonext', 'км', 'dist'
     ]);
     const distanceToDestination = distanceRaw !== undefined 
       ? this.parseNumber(distanceRaw) 
@@ -508,6 +531,21 @@ export class UniversalParser {
     // Пытаемся несколько стратегий
     
     if (typeof content === 'string') {
+      // Проверяем на XML
+      if (content.includes('<') && content.includes('>') && content.includes('</')) {
+        const xmlResult = this.parseXML(content);
+        if (xmlResult.items.length > 0 && xmlResult.items[0].containerNumber) {
+          // Если XML не извлёк location, пробуем извлечь из текста
+          if (!xmlResult.items[0].location) {
+            const textLocation = this.extractLocation(content);
+            if (textLocation) {
+              xmlResult.items[0].location = textLocation;
+            }
+          }
+          return xmlResult;
+        }
+      }
+      
       // Сначала пробуем как JSON
       try {
         const parsed = JSON.parse(content);
@@ -530,6 +568,85 @@ export class UniversalParser {
     }
 
     return this.attemptBestEffort(content);
+  }
+
+  /**
+   * Парсинг XML формата
+   */
+  private parseXML(xml: string): ParseResult {
+    const items: ParsedItem[] = [];
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Простой regex парсинг XML тегов
+    const extractTag = (tagName: string): string | undefined => {
+      // Ищем тег - точное совпадение имени
+      const patterns = [
+        new RegExp(`<${tagName}>\\s*([^<]+)\\s*</${tagName}>`, 'i'),
+        new RegExp(`<${tagName}\\s[^>]*>\\s*([^<]+)\\s*</${tagName}>`, 'i'),
+      ];
+      for (const pattern of patterns) {
+        const match = xml.match(pattern);
+        if (match && match[1]) {
+          return match[1].trim();
+        }
+      }
+      return undefined;
+    };
+
+    const containerNumber = extractTag('Container') || extractTag('ContainerID') || 
+                           extractTag('container_number') || extractTag('ctn') ||
+                           extractTag('ContainerNo');
+    const location = extractTag('Current') || extractTag('Location') || 
+                    extractTag('current_point') || extractTag('LastSeen') ||
+                    extractTag('CurrentLocation') || extractTag('Station');
+    const destination = extractTag('Next') || extractTag('Destination') || 
+                       extractTag('next_hub') || extractTag('To');
+    const distanceStr = extractTag('Distance') || extractTag('distance_km') ||
+                       extractTag('DistToNext');
+    const eta = extractTag('ETA') || extractTag('eta') || extractTag('arrival') ||
+               extractTag('ArrivalDate');
+    const status = extractTag('Status') || extractTag('state');
+
+    if (containerNumber || location) {
+      let confidence = 0.5;
+      if (containerNumber) confidence += 0.2;
+      if (location) confidence += 0.1;
+      if (destination) confidence += 0.1;
+      if (distanceStr) confidence += 0.1;
+
+      const item: ParsedItem = {
+        containerNumber: containerNumber?.toUpperCase(),
+        location,
+        destination,
+        distanceToDestination: distanceStr ? parseInt(distanceStr, 10) : undefined,
+        eta: eta ? this.parseDate(eta) : undefined,
+        statusCode: status ? this.normalizeStatusCode(status) : 'IN_TRANSIT',
+        statusText: status || 'В пути',
+        rawSource: xml,
+        extractionConfidence: confidence,
+      };
+      items.push(item);
+    } else {
+      warnings.push('Could not extract data from XML');
+    }
+
+    return { items, errors, warnings };
+  }
+
+  /**
+   * Нормализация статус-кода
+   */
+  private normalizeStatusCode(status: string): string {
+    const lower = status.toLowerCase();
+    if (lower.includes('rail') || lower.includes('жд') || lower.includes('железк')) return 'ON_RAIL';
+    if (lower.includes('ship') || lower.includes('sea') || lower.includes('мор')) return 'ON_SHIP';
+    if (lower.includes('port') || lower.includes('порт')) return 'IN_PORT';
+    if (lower.includes('warehouse') || lower.includes('склад') || lower.includes('свх')) return 'ON_WAREHOUSE';
+    if (lower.includes('delivered') || lower.includes('доставлен')) return 'DELIVERED';
+    if (lower.includes('loaded') || lower.includes('загружен')) return 'LOADED';
+    if (lower.includes('transit') || lower.includes('пути')) return 'IN_TRANSIT';
+    return 'UNKNOWN';
   }
 
   /**
@@ -602,12 +719,16 @@ export class UniversalParser {
    */
   private extractLocation(text: string): string | undefined {
     const patterns = [
+      // XML теги: <Location>Goncharovo</Location>, <Current>Goncharovo</Current>
+      /<(?:Location|Current|CurrentLocation|Station)>([^<]+)<\//i,
       // Местоположение: порт Владивосток.
       /(?:местоположение|location)[:\s]+(?:порт\s+)?([А-Яа-яёЁA-Za-z\-]+)(?:\.|,|$|\n)/i,
       // порт Владивосток
       /(?:порт|port)\s+([А-Яа-яёЁA-Za-z\-]+)/i,
-      // станция Гончарово
-      /(?:ст\.|станци[яи]|station)\s+([А-Яа-яёЁA-Za-z\-]+(?:\s*[\-]\s*[А-Яа-яёЁA-Za-z]+)?)/i,
+      // Локация: ст Гончарово / Локация: Гончарово
+      /(?:локация)[:\s]+(?:ст\.?\s*)?([А-Яа-яёЁA-Za-z\-]+)/i,
+      // станция Гончарово, ст. Гончарово, ст Гончарово, st. Goncharovo
+      /(?:ст\.?\s+|станци[яи]\s+|station\s+)([А-Яа-яёЁA-Za-z\-]+(?:\s*[\-]\s*[А-Яа-яёЁA-Za-z]+)?)/i,
       // в порту Владивосток
       /(?:в порту|in port)\s+([А-Яа-яёЁA-Za-z\-]+)/i,
       // на станции Гончарово
@@ -618,15 +739,27 @@ export class UniversalParser {
       /(?:текущее местоположение|current location)[:\s]*([А-Яа-яёЁA-Za-z\-]+)/i,
       // находится в/на X
       /(?:находится\s+(?:в|на))\s+([А-Яа-яёЁA-Za-z\-]+)/i,
+      // Текущая: Гончарово
+      /(?:текущая|current)[:\s]+([А-Яа-яёЁA-Za-z\-]+)/i,
+      // Last Seen: Goncharovo Station
+      /(?:last\s*seen|current_point)[:\s]+([А-Яа-яёЁA-Za-z\-]+)(?:\s+station)?/i,
+      // на Гончарово (сейчас на Гончарово)
+      /(?:сейчас\s+)?(?:на|в)\s+([А-Яа-яёЁ][А-Яа-яёЁa-z\-]+)(?:\s*,|\s*где)/i,
+      // → st. Goncharovo (после стрелки)
+      /[→\-]\s*(?:ст\.|st\.?)?\s*([А-Яа-яёЁA-Za-z][\-А-Яа-яёЁA-Za-z]+)/i,
+      // Стоит = станция Гончарово
+      /(?:стоит)[:\s=]+(?:станци[яи]?\s*)?([А-Яа-яёЁA-Za-z\-]+)/i,
     ];
 
     for (const pattern of patterns) {
       const match = text.match(pattern);
       if (match && match[1]) {
-        const location = match[1].trim();
+        let location = match[1].trim();
+        // Убираем Station/станция на конце если есть
+        location = location.replace(/\s*(?:station|станци[яи])$/i, '').trim();
         // Фильтруем служебные слова
-        if (location.length > 2 && 
-            !['назначения', 'отправления', 'destination', 'origin'].includes(location.toLowerCase())) {
+        const forbidden = ['назначения', 'отправления', 'destination', 'origin', 'eta', 'rail', 'ship', 'transit', 'км', 'km', 'seen', 'current', 'east', 'west', 'north', 'south'];
+        if (location.length > 2 && !forbidden.includes(location.toLowerCase())) {
           return location;
         }
       }
@@ -640,16 +773,43 @@ export class UniversalParser {
    */
   private extractDistance(text: string): number | undefined {
     const patterns = [
+      // 1857 км до станции / 1857 km to
       /(\d+(?:\s*\d+)?)\s*(?:км|km)\s*(?:до|to|от|from)/i,
-      /(?:расстояние|distance)[:\s]*(\d+(?:\s*\d+)?)\s*(?:км|km)?/i,
+      // расстояние: 1857 / distance: 1857
+      /(?:расстояние|distance|дистанция|dist)[:\s=]*(\d+(?:\s*\d+)?)\s*(?:км|km)?/i,
+      // DistToNext: 1857 / distance_km: 1857
+      /(?:disttonext|distance_km|dist_km)[:\s=]*(\d+)/i,
+      // 1857 км до станции
       /(\d+(?:\s*\d+)?)\s*(?:км|km)\s+(?:до станции|до порта)/i,
+      // осталось 1857
       /(?:осталось|remaining)[:\s]*(\d+(?:\s*\d+)?)/i,
+      // | 1857 | (pipe-delimited) - 4-значное число между разделителями
+      /\|\s*(\d{3,5})\s*\|/,
+      // 1857 km (просто число с км)
+      /(\d{3,5})\s*(?:км|km)/i,
+      // где-то 1857 км
+      /где[^\d]*(\d{3,5})/i,
+      // Distance: 1857
+      /(?:distance)[:\s]+(\d+)/i,
     ];
 
     for (const pattern of patterns) {
       const match = text.match(pattern);
       if (match && match[1]) {
-        return parseInt(match[1].replace(/\s/g, ''), 10);
+        const num = parseInt(match[1].replace(/\s/g, ''), 10);
+        // Проверяем что число похоже на расстояние (50-15000 км)
+        if (num >= 50 && num <= 15000) {
+          return num;
+        }
+      }
+    }
+
+    // Fallback: ищем число из 4 цифр (типичное расстояние)
+    const fallbackMatch = text.match(/\b(\d{4})\b/);
+    if (fallbackMatch) {
+      const num = parseInt(fallbackMatch[1], 10);
+      if (num >= 100 && num <= 10000) {
+        return num;
       }
     }
 
@@ -660,10 +820,10 @@ export class UniversalParser {
    * Извлечение ETA
    */
   private extractETA(text: string): string | undefined {
-    // Расширенные паттерны для извлечения ETA
-    const patterns = [
+    // Расширенные паттерны для извлечения ETA (с годом)
+    const patternsWithYear = [
       // Явные указания на ETA
-      /(?:eta|ета)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
+      /(?:eta|ета)[:\s=]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
       /(?:ориентир\w*\s*(?:дата\s*)?(?:прибыти[яе])?)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
       /(?:прибытие|прибудет|arrival)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
       /(?:ожида[её]тся|expected|планируется)[:\s]*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/i,
@@ -678,34 +838,93 @@ export class UniversalParser {
       
       // Обратный порядок: дата перед словом
       /(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})\s*[-–—]?\s*(?:ориентир|прибытие|eta)/i,
-      
-      // Словесные месяцы: "15 декабря 2025", "15 дек 2025"
-      /(?:eta|ориентир|прибытие)[:\s]*(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|янв|фев|мар|апр|мая|июн|июл|авг|сен|окт|ноя|дек)\.?\s*(\d{4}|\d{2})/i,
-      /(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|янв|фев|мар|апр|мая|июн|июл|авг|сен|окт|ноя|дек)\.?\s*(\d{4}|\d{2})\s*[-–—]?\s*(?:ориентир|прибытие)/i,
     ];
 
-    for (const pattern of patterns) {
+    // Паттерны для ETA с коротким форматом (без года - подставляем текущий/следующий год)
+    const patternsShort = [
+      // ETA: 04.12 / eta=04.12
+      /(?:eta|ета)[:\s=]*(\d{1,2})[.\/-](\d{1,2})(?!\d)/i,
+      // прибытие 04.12
+      /(?:прибытие|прибудет|arrival)[:\s]*(\d{1,2})[.\/-](\d{1,2})(?!\d)/i,
+      // ETA 04.12 (в конце строки)
+      /\bETA\s*(\d{1,2})[.\/-](\d{1,2})\b/i,
+      // ориентир 04.12
+      /(?:ориентир)[:\s]*(\d{1,2})[.\/-](\d{1,2})(?!\d)/i,
+    ];
+
+    // Словесные месяцы: "15 декабря 2025", "15 дек 2025", "четвёртое декабря"
+    const patternsVerbal = [
+      /(?:eta|ориентир|прибытие)[:\s]*(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|янв|фев|мар|апр|мая|июн|июл|авг|сен|окт|ноя|дек)\.?\s*(\d{4}|\d{2})?/i,
+      /(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|янв|фев|мар|апр|мая|июн|июл|авг|сен|окт|ноя|дек)\.?\s*(\d{4}|\d{2})?\s*[-–—]?\s*(?:ориентир|прибытие)?/i,
+      // "четвёртое декабря", "4-е декабря"
+      /(перв\w*|втор\w*|трет\w*|четв[её]рт\w*|пят\w*|шест\w*|седьм\w*|восьм\w*|девят\w*|десят\w*|\d{1,2}[-]?[оеая]?)\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)/i,
+    ];
+
+    // Сначала ищем полные даты с годом
+    for (const pattern of patternsWithYear) {
       const match = text.match(pattern);
-      if (match) {
-        // Проверяем, есть ли словесный месяц
-        if (match[2] && /[а-яё]/i.test(match[2])) {
-          const day = parseInt(match[1]);
-          const month = this.parseMonthName(match[2]);
-          let year = parseInt(match[3]);
-          if (year < 100) year += 2000;
-          
-          const date = new Date(year, month, day);
-          if (!isNaN(date.getTime())) {
-            return date.toISOString();
-          }
-        } else if (match[1]) {
-          const parsed = this.parseDate(match[1]);
-          if (parsed) return parsed;
+      if (match && match[1]) {
+        const parsed = this.parseDate(match[1]);
+        if (parsed) return parsed;
+      }
+    }
+
+    // Затем словесные месяцы
+    for (const pattern of patternsVerbal) {
+      const match = text.match(pattern);
+      if (match && match[1] && match[2]) {
+        let day = this.parseVerbalDay(match[1]);
+        const month = this.parseMonthName(match[2]);
+        let year = match[3] ? parseInt(match[3]) : new Date().getFullYear();
+        if (year < 100) year += 2000;
+        
+        const date = new Date(year, month, day);
+        if (!isNaN(date.getTime())) {
+          return date.toISOString();
+        }
+      }
+    }
+
+    // Короткие форматы (без года) - подставляем текущий/следующий год
+    for (const pattern of patternsShort) {
+      const match = text.match(pattern);
+      if (match && match[1] && match[2]) {
+        const day = parseInt(match[1]);
+        const month = parseInt(match[2]) - 1; // JS months 0-based
+        const now = new Date();
+        let year = now.getFullYear();
+        
+        // Если дата уже прошла в этом году - берём следующий
+        const testDate = new Date(year, month, day);
+        if (testDate < now) {
+          year++;
+        }
+        
+        const date = new Date(year, month, day);
+        if (!isNaN(date.getTime())) {
+          return date.toISOString();
         }
       }
     }
 
     return undefined;
+  }
+
+  /**
+   * Парсинг словесного дня ("четвёртое" → 4)
+   */
+  private parseVerbalDay(str: string): number {
+    const verbalDays: Record<string, number> = {
+      'перв': 1, 'втор': 2, 'трет': 3, 'четв': 4, 'пят': 5,
+      'шест': 6, 'седьм': 7, 'восьм': 8, 'девят': 9, 'десят': 10,
+    };
+    const clean = str.replace(/[-оеая]/g, '').toLowerCase();
+    for (const [prefix, num] of Object.entries(verbalDays)) {
+      if (clean.startsWith(prefix)) return num;
+    }
+    // Пробуем как число
+    const num = parseInt(str.replace(/\D/g, ''));
+    return isNaN(num) ? 1 : num;
   }
 
   /**
