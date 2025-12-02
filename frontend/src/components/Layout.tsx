@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { 
   Container, 
@@ -10,14 +10,44 @@ import {
   X,
   TrendingUp,
   Upload,
-  ArrowDownToLine
+  ArrowDownToLine,
+  Settings,
+  Bell,
+  Clock,
+  RefreshCw,
+  Eye,
+  Save
 } from 'lucide-react';
 import { exportApi } from '../api/client';
+
+// Глобальные настройки системы
+const DEFAULT_SETTINGS = {
+  staleThresholdDays: 3,
+  upcomingDays: 7,
+  autoRefreshMinutes: 5,
+  showDelivered: true,
+  notifyOverdue: true,
+  notifyStale: true,
+  companyName: 'Rail Trust',
+  defaultExportFormat: 'csv' as 'csv' | 'json',
+};
+
+export type AppSettings = typeof DEFAULT_SETTINGS;
 
 export default function Layout() {
   const location = useLocation();
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    const saved = localStorage.getItem('appSettings');
+    return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
+  });
+
+  const saveSettings = (newSettings: AppSettings) => {
+    setSettings(newSettings);
+    localStorage.setItem('appSettings', JSON.stringify(newSettings));
+  };
 
   const navItems = [
     { path: '/dashboard', label: 'Дашборд', icon: TrendingUp },
@@ -107,12 +137,26 @@ export default function Layout() {
           </button>
         </div>
 
-        {/* Footer */}
+        {/* Settings button */}
         <div className="p-4 border-t border-slate-800/50">
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800/30 hover:bg-slate-700/50 text-slate-400 hover:text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            <Settings className="w-4 h-4" />
+            Настройки
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div className="px-4 pb-4">
           <div className="px-4 py-3 rounded-lg bg-slate-800/30">
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <LayoutDashboard className="w-4 h-4" />
               <span>Панель логиста</span>
+            </div>
+            <div className="text-[10px] text-slate-600 mt-1">
+              {settings.companyName}
             </div>
           </div>
         </div>
@@ -170,6 +214,205 @@ export default function Layout() {
                   Подготовка файла...
                 </p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 max-w-lg w-full animate-slide-up">
+            <div className="p-5 border-b border-slate-700 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Settings className="w-5 h-5 text-brand-400" />
+                Настройки системы
+              </h3>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-5 space-y-6 max-h-[70vh] overflow-auto">
+              {/* Company name */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Название компании
+                </label>
+                <input 
+                  type="text"
+                  value={settings.companyName}
+                  onChange={(e) => saveSettings({ ...settings, companyName: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-brand-500 transition-colors"
+                  placeholder="Rail Trust"
+                />
+              </div>
+
+              {/* Section: Monitoring */}
+              <div>
+                <h4 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <Bell className="w-4 h-4" />
+                  Мониторинг
+                </h4>
+                <div className="space-y-4 pl-1">
+                  <div>
+                    <label className="block text-sm text-slate-300 mb-2">
+                      Порог устаревания (дней без обновлений)
+                    </label>
+                    <input 
+                      type="number"
+                      min="1"
+                      max="30"
+                      value={settings.staleThresholdDays}
+                      onChange={(e) => saveSettings({ ...settings, staleThresholdDays: parseInt(e.target.value) || 3 })}
+                      className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-brand-500"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      Контейнеры без обновлений дольше этого срока будут помечены как «устаревшие»
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm text-slate-300 mb-2">
+                      Горизонт прибытий (дней вперёд)
+                    </label>
+                    <input 
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={settings.upcomingDays}
+                      onChange={(e) => saveSettings({ ...settings, upcomingDays: parseInt(e.target.value) || 7 })}
+                      className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-brand-500"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      За сколько дней показывать ожидаемые прибытия на дашборде
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section: Auto-refresh */}
+              <div>
+                <h4 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4" />
+                  Автообновление
+                </h4>
+                <div className="pl-1">
+                  <label className="block text-sm text-slate-300 mb-2">
+                    Интервал обновления (минут)
+                  </label>
+                  <input 
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={settings.autoRefreshMinutes}
+                    onChange={(e) => saveSettings({ ...settings, autoRefreshMinutes: parseInt(e.target.value) || 5 })}
+                    className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-brand-500"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Данные на дашборде обновляются автоматически с указанным интервалом
+                  </p>
+                </div>
+              </div>
+
+              {/* Section: Display */}
+              <div>
+                <h4 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <Eye className="w-4 h-4" />
+                  Отображение
+                </h4>
+                <div className="space-y-3 pl-1">
+                  <div className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg">
+                    <div>
+                      <div className="text-sm text-slate-300">Показывать доставленные</div>
+                      <div className="text-xs text-slate-500">Учитывать доставленные контейнеры в статистике</div>
+                    </div>
+                    <button
+                      onClick={() => saveSettings({ ...settings, showDelivered: !settings.showDelivered })}
+                      className={`w-12 h-6 rounded-full transition-colors ${
+                        settings.showDelivered ? 'bg-brand-500' : 'bg-slate-700'
+                      }`}
+                    >
+                      <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                        settings.showDelivered ? 'translate-x-6' : 'translate-x-0.5'
+                      }`} />
+                    </button>
+                  </div>
+                  
+                  <div className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg">
+                    <div>
+                      <div className="text-sm text-slate-300">Уведомления о просрочке</div>
+                      <div className="text-xs text-slate-500">Выделять контейнеры с просроченным ETA</div>
+                    </div>
+                    <button
+                      onClick={() => saveSettings({ ...settings, notifyOverdue: !settings.notifyOverdue })}
+                      className={`w-12 h-6 rounded-full transition-colors ${
+                        settings.notifyOverdue ? 'bg-brand-500' : 'bg-slate-700'
+                      }`}
+                    >
+                      <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                        settings.notifyOverdue ? 'translate-x-6' : 'translate-x-0.5'
+                      }`} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section: Export */}
+              <div>
+                <h4 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <Download className="w-4 h-4" />
+                  Экспорт
+                </h4>
+                <div className="pl-1">
+                  <label className="block text-sm text-slate-300 mb-2">
+                    Формат экспорта по умолчанию
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => saveSettings({ ...settings, defaultExportFormat: 'csv' })}
+                      className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                        settings.defaultExportFormat === 'csv'
+                          ? 'bg-brand-500 text-white'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      CSV (для 1С)
+                    </button>
+                    <button
+                      onClick={() => saveSettings({ ...settings, defaultExportFormat: 'json' })}
+                      className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                        settings.defaultExportFormat === 'json'
+                          ? 'bg-brand-500 text-white'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      JSON (для API)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 border-t border-slate-700 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  saveSettings(DEFAULT_SETTINGS);
+                }}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
+              >
+                Сбросить настройки
+              </button>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="px-6 py-2.5 bg-brand-500 hover:bg-brand-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                Сохранить
+              </button>
             </div>
           </div>
         </div>
